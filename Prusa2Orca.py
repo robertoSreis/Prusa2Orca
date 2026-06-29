@@ -6,6 +6,8 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
 import configparser
 import datetime
+import traceback
+import argparse
 from typing import Dict, List, Optional
 
 def resource_path(relative_path):
@@ -133,16 +135,6 @@ TRANSLATIONS = {
     }
 }
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-
 class PrusaOrcaConverter:
     def __init__(self, log_callback=None):
         
@@ -189,8 +181,6 @@ class PrusaOrcaConverter:
         log_message = f"[{timestamp}] {level.upper()}: {message}"
         if self.log_callback:
             self.log_callback(log_message)
-        else:
-            print(log_message)
     
     def read_ini_file(self, file_path: Path) -> Dict[str, Dict[str, str]]:
         """Read an INI file and return a dictionary of sections and key-value pairs"""
@@ -205,8 +195,11 @@ class PrusaOrcaConverter:
             parsed_config = {}
             for section in config.sections():
                 parsed_config[section] = dict(config.items(section))
-                self.log("debug", f"Section {section} has {len(parsed_config[section])} parameters")
+                n = len(parsed_config[section])
+                self.log("debug", f"Section {section} has {n} parameters")
             
+            total_params = sum(len(v) for v in parsed_config.values())
+            self.log("info", f"Read {len(parsed_config)} sections, {total_params} total parameters")
             return parsed_config
         except Exception as e:
             self.log("error", f"Failed to read INI file: {str(e)}")
@@ -234,9 +227,12 @@ class PrusaOrcaConverter:
                     ini_type = "print"
                     profile_name = section_name
                 
+                
                 if ini_type not in self.parameter_map:
                     self.log("warning", f"Skipping unsupported section type: {ini_type}")
                     continue
+                
+                self.log("info", f"  Converting [{ini_type}] {profile_name} ({len(config)} params)")
                 
                 # Create Orca config structure
                 orca_config = {
@@ -246,11 +242,15 @@ class PrusaOrcaConverter:
                     "version": ORCA_SLICER_VERSION
                 }
                 
+                mapped_count = 0
                 # Convert parameters
                 for param, value in config.items():
                     if param in self.parameter_map[ini_type]:
                         orca_param = self.parameter_map[ini_type][param]
                         orca_config[orca_param] = value
+                        mapped_count += 1
+                    #else:
+                    #    print(f"[CONVERT]     Unmapped param: {param}={value}", flush=True)
                 
                 # Save as JSON
                 safe_name = "".join(c for c in profile_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
@@ -259,13 +259,14 @@ class PrusaOrcaConverter:
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(orca_config, f, indent=4, ensure_ascii=False)
                 
-                self.log("info", f"Saved config to {output_file}")
+                self.log("info", f"  Saved {safe_name}.json ({mapped_count} params mapped)")
             
             self.log("info", "Conversion completed successfully")
             return True
             
         except Exception as e:
             self.log("error", f"Conversion failed: {str(e)}")
+            traceback.print_exc()
             return False
 
 class ParameterEditor(tk.Frame):
@@ -437,18 +438,18 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
         """
     }
 
-    def __init__(self, root):
+    def __init__(self, root, input_file=None, output_dir=None):
         self.root = root
         self.root.title(APP_NAME)
+        self.cli_input = input_file
+        self.cli_output = output_dir
+        self.current_language = "en"  # Default language set to English
+        self.log_messages = []
         try:
             self.root.iconbitmap(resource_path("Prusa2Orca.ico"))
         except Exception as e:
-            print(f"Erro ao carregar ícone: {e}")  # Isso ajudará no debug
+            self.add_log_message(self._(f"Icon load error: {e}"))
         self.root.geometry("1200x800")
-        
-        # Initialize variables
-        self.log_messages = []
-        self.current_language = "en"  # Default language set to English
         self.loaded_parameters = {}
         self.parameter_widgets = {
             "print": {},
@@ -476,6 +477,14 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
         self.setup_main_tab()
         self.setup_settings_tab()
         self.setup_about_tab()
+
+        # Pre-fill from CLI args if provided
+        if self.cli_input:
+            self.input_file_entry.insert(0, self.cli_input)
+            if os.path.exists(self.cli_input):
+                self.load_parameters(self.cli_input)
+        if self.cli_output:
+            self.output_dir_entry.insert(0, self.cli_output)
     
     def _(self, text: str) -> str:
         """Translation function"""
@@ -701,12 +710,17 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
                     total_params = len(config.items())
                     param_count = 0
                     
-                    for param, value in config.items():
+                    # Only show parameters that have a mapping in the converter
+                    mapped_params = self.converter.parameter_map.get(ini_type, {})
+                    filtered = [(p, v) for p, v in config.items() if p in mapped_params]
+                    self.add_log_message(self._(f"Section {section_name}: {len(filtered)} of {len(config)} parameters are mappable"))
+                    
+                    for param, value in filtered:
                         param_count += 1
-                        progress = 50 + (param_count / total_params) * 50 * (section_count / total_sections)
+                        progress = 50 + (param_count / len(filtered)) * 50 * (section_count / total_sections) if filtered else 100
                         self.progress_var.set(progress)
                         self.progress_status.config(
-                            text=self._(f"Processing parameter {param_count} of {total_params} in section {section_name} ({int(progress)}%)")
+                            text=self._(f"Processing parameter {param_count} of {len(filtered)} in section {section_name} ({int(progress)}%)")
                         )
                         self.root.update_idletasks()
                         
@@ -719,12 +733,19 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
             
             self.progress_var.set(100)
             self.progress_status.config(text=self._("Loading completed successfully"))
-            self.add_log_message(self._("Parameters loaded successfully"))
+            total_mappable = sum(
+                len([p for p in cfg if p in self.converter.parameter_map.get(
+                    sec.split(":")[0].lower() if ":" in sec else "print", {}
+                )])
+                for sec, cfg in self.loaded_parameters.items()
+            )
+            self.add_log_message(self._(f"Loaded {len(self.loaded_parameters)} sections ({total_mappable} mappable parameters)"))
             
         except Exception as e:
             self.progress_var.set(0)
             self.progress_status.config(text=self._(f"Loading error: {str(e)}"))
             self.add_log_message(self._(f"Error loading parameters: {str(e)}"))
+            traceback.print_exc()
             messagebox.showerror(self._("Error"), self._(f"Failed to load parameters: {str(e)}"))
         finally:
             self.root.after(2000, lambda: self.progress_var.set(0))  # Reset progress bar after 2 seconds
@@ -745,7 +766,6 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
         
         try:
             # Clear log
-            self.log_text.delete(1.0, tk.END)
             
             # Collect parameters from all tabs
             self.progress_status.config(text=self._("Preparing parameters for conversion..."))
@@ -761,6 +781,8 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
                             if result:
                                 param, value = result
                                 updated_configs[section_name][param] = value
+            total_params = sum(len(v) for v in updated_configs.values())
+            self.add_log_message(self._(f"Collected {len(updated_configs)} sections ({total_params} enabled parameters)"))
             
             # Perform conversion
             self.add_log_message(self._("Starting conversion..."))
@@ -778,6 +800,7 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
         
         except Exception as e:
             self.progress_status.config(text=self._(f"Conversion error: {str(e)}"))
+            traceback.print_exc()
             messagebox.showerror(self._("Error"), self._("An error occurred during conversion:") + f"\n{str(e)}")
     
     def apply_settings(self):
@@ -809,10 +832,26 @@ Versión de OrcaSlicer soportada: {ORCA_SLICER_VERSION}
         # Update about text
         self.update_about_text()
 
+def exception_handler(exc_type, exc_value, exc_traceback):
+    """Global exception handler for unhandled exceptions"""
+    print(f"\n[FATAL] Unhandled exception: {exc_type.__name__}: {exc_value}", file=sys.stderr, flush=True)
+    traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+
 def main():
-    root = tk.Tk()
-    app = ConverterApp(root)
-    root.mainloop()
+    sys.excepthook = exception_handler
+
+    parser = argparse.ArgumentParser(description="Convert PrusaSlicer configuration to OrcaSlicer format")
+    parser.add_argument("--input", "-i", help="Input PrusaSlicer .ini config file")
+    parser.add_argument("--output", "-o", help="Output directory for converted JSON files")
+    args = parser.parse_args()
+
+    try:
+        root = tk.Tk()
+        app = ConverterApp(root, input_file=args.input, output_dir=args.output)
+        root.mainloop()
+    except Exception as e:
+        print(f"[MAIN FATAL] {e}", file=sys.stderr, flush=True)
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
