@@ -64,7 +64,7 @@ SE3D - Prusa/Orca Converter is a desktop application designed to bridge the gap 
 
 ### Option 1: Pre-compiled Executable (Windows)
 
-1. Download the latest release from the [Releases](https://github.com/yourusername/prusa2orca/releases) page
+1. Download the latest release from the [Releases](https://github.com/robertoSreis/Prusa2Orca/releases) page
 2. Extract the archive
 3. Run `Prusa2Orca.exe`
 
@@ -80,7 +80,7 @@ SE3D - Prusa/Orca Converter is a desktop application designed to bridge the gap 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/prusa2orca.git
+git clone https://github.com/robertoSreis/Prusa2Orca.git
 cd prusa2orca
 
 # Run the application
@@ -110,6 +110,23 @@ No additional packages are required beyond Python's standard library.
    - Click the "Convert" button
    - Monitor progress in the log window
    - Converted files will be saved as JSON in the output directory
+
+### Command Line Usage
+
+You can also specify the input file and output directory directly via command line,
+which pre-fills the fields in the GUI on startup:
+
+```bash
+python Prusa2Orca.py --input /path/to/config_bundle.ini --output /path/to/output_dir
+```
+
+| Argument | Short | Description |
+|----------|-------|-------------|
+| `--input` | `-i` | Path to a PrusaSlicer `.ini` configuration bundle |
+| `--output` | `-o` | Directory where converted JSON files will be saved |
+
+If the input file exists, it will be loaded automatically. You can still use the
+Browse buttons in the GUI to change either path before converting.
 
 ### Settings Configuration
 
