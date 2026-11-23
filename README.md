@@ -80,8 +80,8 @@ SE3D - Prusa/Orca Converter is a desktop application designed to bridge the gap 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/prusa2orca.git
-cd prusa2orca
+git clone https://github.com/robertoSreis/Prusa2Orca.git
+cd Prusa2Orca
 
 # Run the application
 python Prusa2Orca.py
